@@ -131,10 +131,6 @@ func (p *DockerAuthProxy) ReplaceResponseLocation(location string, request *http
 	return location
 }
 
-func (p *DockerAuthProxy) ProcessRequestAuth(req *http.Request) {
-
-}
-
 func (p *DockerAuthProxy) ProcessRegistryAuth(req *http.Request) {
 
 }

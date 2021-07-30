@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,11 +25,30 @@ var (
 
 // https://github.com/cesanta/docker_auth.git
 var (
-	urlRegex    = regexp.MustCompile(`/v2/[A-Za-z0-9|\-|_|/|\.]+/blobs/`)
-	urlGetRegex = regexp.MustCompile(`/v2/[A-Za-z0-9|\-|_|/|\.]+/manifests/`)
-	scopeRegex  = regexp.MustCompile(`([a-z0-9]+)(\([a-z0-9]+\))?`)
+	urlRegex      = regexp.MustCompile(`/v2/[A-Za-z0-9|\-|_|/|\.]+/blobs/`)
+	urlGetRegex   = regexp.MustCompile(`/v2/[A-Za-z0-9|\-|_|/|\.]+/manifests/`)
+	scopeRegex    = regexp.MustCompile(`([a-z0-9]+)(\([a-z0-9]+\))?`)
+	hostPortRegex = regexp.MustCompile(`\[?(.+?)\]?:\d+$`)
 )
 
+type AuthRequest struct {
+	RemoteConnAddr string
+	RemoteAddr     string
+	RemoteIP       net.IP
+	User           string
+	Password       string
+	Account        string
+	Service        string
+	Scopes         []AuthScope
+	Labels         map[string][]string
+}
+
+type AuthScope struct {
+	Type    string
+	Class   string
+	Name    string
+	Actions []string
+}
 type DockerAuthProxy struct {
 	ProxyAddress        string
 	CurrentSchema       string
@@ -40,6 +60,12 @@ type DockerAuthProxy struct {
 	ProxyAuthPassword   string
 	WebAuthURL          string
 	WebAuthType         string
+	ProxyConfig         ProxyConfig
+}
+
+type ProxyConfig struct {
+	RealIPHeader string
+	RealIPPos    int
 }
 
 func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
@@ -117,57 +143,112 @@ func (p *DockerAuthProxy) ProxyHttps() bool {
 	return false
 }
 
-//scope=repository:samalba/my-app:push
-func (t *DockerAuthProxy) VerifyDockerPolicy(w http.ResponseWriter, r *http.Request) (bool, string) {
-	var repo = ""
-	var operator = ""
-	// pull GET docker.tpaas.jd.com /v2/busybox/manifests/1.31.1-glibc
-	//Received request GET docker.tpaas.jd.com /v2/busybox/manifests/1.31.1-glibc 10.127.0.87:42468
-	//Received request GET docker.tpaas.jd.com /v2/ 10.127.0.87:42468
-	//Received request GET docker.tpaas.jd.com /v2/busybox/manifests/1.31.1-glibc 10.127.0.87:42674
-	//Received request GET docker.tpaas.jd.com /v2/busybox/blobs/sha256:0e3a2ba15eaabe8ccaa18c4613dc039bd42b1bb289e71ca8afcd5c99e8513bbb 10.127.0.87:42468
-	//Received request GET docker.tpaas.jd.com /v2/busybox/blobs/sha256:cf961e78c7616cfe2db43da699ae046666186162f30933341bdf9bfb92f2aa67 10.127.0.87:42678
-	// push
-	requestUri := r.RequestURI
-	repo = parseRepo(requestUri)
-	if repo == "" {
-		return true, ""
+func parseRemoteAddr(ra string) net.IP {
+	hp := hostPortRegex.FindStringSubmatch(ra)
+	if hp != nil {
+		ra = string(hp[1])
 	}
-	authorization := r.Header.Get("Authorization")
-	if authorization == "" {
-		return false, repo
-	}
-	tokens := strings.Split(authorization, " ")
-	if len(tokens) < 2 {
-		return false, repo
-	}
-	ar, err := t.DecodeToken(tokens[1])
-	if err != nil {
-		return false, repo
-	}
+	res := net.ParseIP(ra)
+	return res
+}
 
-	if strings.ToUpper(r.Method) == "GET" {
-		operator = "pull"
-	} else if strings.ToUpper(r.Method) == "HEAD" ||
-		strings.ToUpper(r.Method) == "POST" ||
-		strings.ToUpper(r.Method) == "PUT" ||
-		strings.ToUpper(r.Method) == "PATCH" {
-		operator = "push"
+func (r *DockerAuthProxy) ParseRequest(req *http.Request) (*AuthRequest, error) {
+	ar := &AuthRequest{RemoteConnAddr: req.RemoteAddr, RemoteAddr: req.RemoteAddr}
+	if r.ProxyConfig.RealIPHeader != "" {
+		hv := req.Header.Get(r.ProxyConfig.RealIPHeader)
+		ips := strings.Split(hv, ",")
+		realIPPos := r.ProxyConfig.RealIPPos
+		if realIPPos < 0 {
+			realIPPos = len(ips) + realIPPos
+			if realIPPos < 0 {
+				realIPPos = 0
+			}
+		}
+		ar.RemoteAddr = strings.TrimSpace(ips[realIPPos])
+		log.Logger.Info("conn info", zap.String("RemoteAddr", ar.RemoteAddr),
+			zap.String("RealIPHeader", r.ProxyConfig.RealIPHeader),
+			zap.String("RealIPHeaderValue", hv))
+		if ar.RemoteAddr == "" {
+			return nil, fmt.Errorf("client address not provided")
+		}
 	}
-	ari := &auth.AuthRequestInfo{}
-	ari.Service = ar.Service
-	ari.Account = ar.User
-	ari.Type = "repository"
-	ari.Name = repo
-	ari.Actions = []string{
-		operator,
+	ar.RemoteIP = parseRemoteAddr(ar.RemoteAddr)
+	if ar.RemoteIP == nil {
+		return nil, fmt.Errorf("unable to parse remote addr %s", ar.RemoteAddr)
 	}
-	_, err = t.UserResourcePolicy.AuthorizeUserResourceScope(ari)
-	if err != nil {
-		t.Logger.Error(fmt.Sprintf("verify user docker repo policy error, repo is %s ,operator is %s", repo, operator), err)
-		return false, repo
+	user, password, haveBasicAuth := req.BasicAuth()
+	if haveBasicAuth {
+		ar.User = user
+		ar.Password = password
+	} else if req.Method == "POST" {
+		// username and password could be part of form data
+		username := req.FormValue("username")
+		password := req.FormValue("password")
+		if username != "" && password != "" {
+			ar.User = username
+			ar.Password = password
+		}
 	}
-	return true, repo
+	ar.Account = req.FormValue("account")
+	if ar.Account == "" {
+		ar.Account = ar.User
+	} else if haveBasicAuth && ar.Account != ar.User {
+		return nil, fmt.Errorf("user and account are not the same (%q vs %q)", ar.User, ar.Account)
+	}
+	ar.Service = req.FormValue("service")
+	if err := req.ParseForm(); err != nil {
+		return nil, fmt.Errorf("invalid form value")
+	}
+	//https://docs.docker.com/registry/spec/auth/token/
+	// https://github.com/docker/distribution/blob/1b9ab303a477ded9bdd3fc97e9119fa8f9e58fca/docs/spec/auth/scope.md#resource-scope-grammar
+	if req.FormValue("scope") != "" {
+		for _, scopeValue := range req.Form["scope"] {
+			for _, scopeStr := range strings.Split(scopeValue, " ") {
+
+				scope, err := r.ParseScope(scopeStr)
+				if err != nil {
+					log.Logger.Error("parse scope error", zap.Error(err))
+					return nil, fmt.Errorf("invalid scope: %q", scopeStr)
+				}
+				sort.Strings(scope.Actions)
+				ar.Scopes = append(ar.Scopes, *scope)
+			}
+		}
+	}
+	return ar, nil
+}
+
+func (r *DockerAuthProxy) ParseRepoRequest(req *http.Request) *AuthScope {
+	var resourceType = ""
+	var class = ""
+	var repoName = ""
+	var actions []string
+	if strings.HasPrefix(req.URL.Path, "/v2/_catalog") {
+		resourceType = "registry"
+		actions = append(actions, "*")
+		return &AuthScope{
+			Type:    resourceType,
+			Actions: actions,
+		}
+	}
+	repoName = parseRepo(req.URL.RawPath)
+	resourceType = "repository"
+	reqMethod := req.Method
+	switch reqMethod {
+	case "GET", "HEAD":
+		actions = append(actions, "pull")
+	case "PUT", "POST", "PATCH", "DELETE":
+		actions = append(actions, "push")
+	default:
+		actions = append(actions, "pull")
+	}
+	class = "image"
+	return &AuthScope{
+		Type:    resourceType,
+		Class:   class,
+		Name:    repoName,
+		Actions: actions,
+	}
 }
 
 func parseRepo(requestPath string) string {
@@ -190,9 +271,9 @@ func parseRepo(requestPath string) string {
 	return ""
 }
 
-func (t *DockerAuthProxy) ParseScope(scopeStr string) (*auth.AuthScope, error) {
+func (t *DockerAuthProxy) ParseScope(scopeStr string) (*AuthScope, error) {
 	parts := strings.Split(scopeStr, ":")
-	var scope auth.AuthScope
+	var scope AuthScope
 
 	scopeType, scopeClass, err := parseScope(parts[0])
 	if err != nil {
@@ -200,14 +281,14 @@ func (t *DockerAuthProxy) ParseScope(scopeStr string) (*auth.AuthScope, error) {
 	}
 	switch len(parts) {
 	case 3:
-		scope = auth.AuthScope{
+		scope = AuthScope{
 			Type:    scopeType,
 			Class:   scopeClass,
 			Name:    parts[1],
 			Actions: strings.Split(parts[2], ","),
 		}
 	case 4:
-		scope = auth.AuthScope{
+		scope = AuthScope{
 			Type:    scopeType,
 			Class:   scopeClass,
 			Name:    parts[1] + ":" + parts[2],

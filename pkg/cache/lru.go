@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"fmt"
+
 	lru "github.com/hashicorp/golang-lru"
 )
 
@@ -18,6 +20,14 @@ func NewAuthCache() *AuthCache {
 	}
 }
 
-func (c *AuthCache) GetAuthToken(username, scope, repo, action string) string {
-	return ""
+func (c *AuthCache) GetAuthToken(username, scope, repo, action string) (string, bool) {
+	key := fmt.Sprintf("%s:%s:%s:%s", username, scope, repo, action)
+	value, ok := c.cache.Get(key)
+	if ok {
+		if valuestr, ok := value.(string); ok {
+			return valuestr, true
+		}
+	}
+	return "", false
+
 }

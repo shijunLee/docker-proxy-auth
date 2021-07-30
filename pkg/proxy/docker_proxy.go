@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -61,6 +62,7 @@ type DockerAuthProxy struct {
 	WebAuthURL          string
 	WebAuthType         string
 	ProxyConfig         ProxyConfig
+	CurrentHost         string
 }
 
 type ProxyConfig struct {
@@ -113,7 +115,13 @@ func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
 }
 
 func (p *DockerAuthProxy) DoProxy(w http.ResponseWriter, r *http.Request) {
-	p.proxy.ServeHTTP(w, r)
+	requestPath := r.URL.Path
+	if strings.HasPrefix(requestPath, "/v2") {
+		if p.processRequest(r, w) {
+			p.proxy.ServeHTTP(w, r)
+		}
+	}
+
 }
 
 func (p *DockerAuthProxy) ReplaceResponseLocation(location string, request *http.Request) string {
@@ -150,6 +158,93 @@ func parseRemoteAddr(ra string) net.IP {
 	}
 	res := net.ParseIP(ra)
 	return res
+}
+
+type DockerUnauthorized struct {
+	Errors []DockerUnauthorizedError
+}
+type DockerUnauthorizedError struct {
+	Code    string                          `json:"code"`
+	Message string                          `json:"message"`
+	Details []DockerUnauthorizedErrorDetail `json:"detail"`
+}
+type DockerUnauthorizedErrorDetail struct {
+	Type   string `json:"Type"`
+	Name   string `json:"Name"`
+	Action string `json:"Action"`
+}
+
+func NewDockerUnauthorized(authScope *AuthScope) *DockerUnauthorized {
+	if authScope == nil {
+		return &DockerUnauthorized{
+			Errors: []DockerUnauthorizedError{
+				{
+					Code:    "UNAUTHORIZED",
+					Message: "access to the requested resource is not authorized",
+				},
+			},
+		}
+	}
+	var details []DockerUnauthorizedErrorDetail
+	for _, action := range authScope.Actions {
+		details = append(details, DockerUnauthorizedErrorDetail{
+			Type:   authScope.Type,
+			Name:   authScope.Name,
+			Action: action,
+		})
+	}
+	return &DockerUnauthorized{
+		Errors: []DockerUnauthorizedError{
+			{
+				Code:    "UNAUTHORIZED",
+				Message: "access to the requested resource is not authorized",
+				Details: details,
+			},
+		},
+	}
+}
+
+//processRequest do auth and token verify for request
+func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWriter) bool {
+	authScope := r.ParseRepoRequest(req)
+	authorizationInfo := req.Header.Get("Authorization")
+	isNotContainToken := false
+	if authorizationInfo == "" {
+		// HTTP/1.1 401 Unauthorized
+		// Content-Type: application/json; charset=utf-8
+		// Docker-Distribution-Api-Version: registry/2.0
+		// Www-Authenticate: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:samalba/my-app:pull,push"
+		// Date: Thu, 10 Sep 2015 19:32:31 GMT
+		// Content-Length: 235
+		// Strict-Transport-Security: max-age=31536000
+
+		// {"errors":[{"code":"UNAUTHORIZED","message":"access to the requested resource is not authorized","detail":[{"Type":"repository","Name":"samalba/my-app","Action":"pull"},{"Type":"repository","Name":"samalba/my-app","Action":"push"}]}]}
+		isNotContainToken = true
+	}
+	authorizationInfos := strings.Split(authorizationInfo, " ")
+	if len(authorizationInfos) != 2 || authorizationInfos[0] != "Bearer" {
+		isNotContainToken = true
+	}
+	if !r.verifyToken(authorizationInfos[1]) {
+		isNotContainToken = true
+	}
+	if isNotContainToken {
+		w.Header().Add("Content-Type", "application/json; charset=utf-8")
+		w.Header().Add("Docker-Distribution-Api-Version", "registry/2.0")
+		realm := fmt.Sprintf(`realm="%s/dockerauth,service="registry.docker.io",scope="%s:%s:%s"`, r.CurrentHost, authScope.Type, authScope.Name, strings.Join(authScope.Actions, ","))
+		w.Header().Add("Www-Authenticate", fmt.Sprintf("Bearer %s", realm))
+		w.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
+		w.WriteHeader(401)
+		result := NewDockerUnauthorized(authScope)
+		// do not need process err here
+		data, _ := json.Marshal(result)
+		w.Write(data)
+		return false
+	}
+	return true
+}
+func (r *DockerAuthProxy) verifyToken(token string) bool {
+	return false
 }
 
 func (r *DockerAuthProxy) ParseRequest(req *http.Request) (*AuthRequest, error) {

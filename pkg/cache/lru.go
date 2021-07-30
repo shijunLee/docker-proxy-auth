@@ -20,6 +20,13 @@ func NewAuthCache() *AuthCache {
 	}
 }
 
+//SetAuthToken add auth token to lru cache
+func (c *AuthCache) SetAuthToken(username, scope, repo, action, token string) {
+	key := fmt.Sprintf("%s:%s:%s:%s", username, scope, repo, action)
+	_ = c.cache.Add(key, token)
+}
+
+//GetAuthToken get Auth token from lru cache
 func (c *AuthCache) GetAuthToken(username, scope, repo, action string) (string, bool) {
 	key := fmt.Sprintf("%s:%s:%s:%s", username, scope, repo, action)
 	value, ok := c.cache.Get(key)

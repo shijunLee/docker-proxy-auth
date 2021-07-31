@@ -31,7 +31,6 @@ type DockerAuthProxy struct {
 	proxy               *httputil.ReverseProxy
 	ProxyAuthUserName   string
 	ProxyAuthPassword   string
-	WebAuthURL          string
 	CurrentHost         string
 	UserAuth            userauth.Auth
 }

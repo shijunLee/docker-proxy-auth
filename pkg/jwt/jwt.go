@@ -18,7 +18,6 @@ import (
 )
 
 type Algorithm string
-type AuthLogger func(msg string, err error)
 
 const (
 	HS256 Algorithm = "HS256"
@@ -49,11 +48,10 @@ type JWTConfig struct {
 	ExpirationTime  int
 	AlgorithmMethod Algorithm
 	AuthDomain      string
-	Logger          AuthLogger
 	algorithm       jwt.SigningMethod
 }
 
-func NewJWTConfig(logger AuthLogger, expirationTime int) *JWTConfig {
+func NewJWTConfig(expirationTime int) *JWTConfig {
 
 	// jwtAuthConfig := config.GlobalConfig.AuthConfig.JWTConfig
 	// var jwtTime = jwtAuthConfig.ExpirationHour

@@ -8,11 +8,12 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/shijunLee/docker-proxy-auth/pkg/common"
 	"github.com/shijunLee/docker-proxy-auth/pkg/log"
+	"github.com/shijunLee/docker-proxy-auth/pkg/userauth"
 	"go.uber.org/zap"
 )
 
@@ -26,30 +27,10 @@ var (
 
 // https://github.com/cesanta/docker_auth.git
 var (
-	urlRegex      = regexp.MustCompile(`/v2/[A-Za-z0-9|\-|_|/|\.]+/blobs/`)
-	urlGetRegex   = regexp.MustCompile(`/v2/[A-Za-z0-9|\-|_|/|\.]+/manifests/`)
-	scopeRegex    = regexp.MustCompile(`([a-z0-9]+)(\([a-z0-9]+\))?`)
-	hostPortRegex = regexp.MustCompile(`\[?(.+?)\]?:\d+$`)
+	urlRegex    = regexp.MustCompile(`/v2/[A-Za-z0-9|\-|_|/|\.]+/blobs/`)
+	urlGetRegex = regexp.MustCompile(`/v2/[A-Za-z0-9|\-|_|/|\.]+/manifests/`)
 )
 
-type AuthRequest struct {
-	RemoteConnAddr string
-	RemoteAddr     string
-	RemoteIP       net.IP
-	User           string
-	Password       string
-	Account        string
-	Service        string
-	Scopes         []AuthScope
-	Labels         map[string][]string
-}
-
-type AuthScope struct {
-	Type    string
-	Class   string
-	Name    string
-	Actions []string
-}
 type DockerAuthProxy struct {
 	ProxyAddress        string
 	CurrentSchema       string
@@ -61,13 +42,9 @@ type DockerAuthProxy struct {
 	ProxyAuthPassword   string
 	WebAuthURL          string
 	WebAuthType         string
-	ProxyConfig         ProxyConfig
-	CurrentHost         string
-}
 
-type ProxyConfig struct {
-	RealIPHeader string
-	RealIPPos    int
+	CurrentHost string
+	UserAuth    userauth.Auth
 }
 
 func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
@@ -117,7 +94,7 @@ func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
 func (p *DockerAuthProxy) DoProxy(w http.ResponseWriter, r *http.Request) {
 	requestPath := r.URL.Path
 	if strings.HasPrefix(requestPath, "/v2") {
-		if p.processRequest(r, w) {
+		if ok, token := p.processRequest(r, w); ok && p.verifyToken(token) {
 			p.proxy.ServeHTTP(w, r)
 		}
 	}
@@ -129,10 +106,6 @@ func (p *DockerAuthProxy) ReplaceResponseLocation(location string, request *http
 		return strings.Replace(location, "http://", "https://", -1)
 	}
 	return location
-}
-
-func (p *DockerAuthProxy) ProcessRegistryAuth(req *http.Request) {
-
 }
 
 func (p *DockerAuthProxy) ProxyHttps() bool {
@@ -147,74 +120,22 @@ func (p *DockerAuthProxy) ProxyHttps() bool {
 	return false
 }
 
-func parseRemoteAddr(ra string) net.IP {
-	hp := hostPortRegex.FindStringSubmatch(ra)
-	if hp != nil {
-		ra = string(hp[1])
-	}
-	res := net.ParseIP(ra)
-	return res
-}
-
-type DockerUnauthorized struct {
-	Errors []DockerUnauthorizedError
-}
-type DockerUnauthorizedError struct {
-	Code    string                          `json:"code"`
-	Message string                          `json:"message"`
-	Details []DockerUnauthorizedErrorDetail `json:"detail"`
-}
-type DockerUnauthorizedErrorDetail struct {
-	Type   string `json:"Type"`
-	Name   string `json:"Name"`
-	Action string `json:"Action"`
-}
-
-func NewDockerUnauthorized(authScope *AuthScope) *DockerUnauthorized {
-	if authScope == nil {
-		return &DockerUnauthorized{
-			Errors: []DockerUnauthorizedError{
-				{
-					Code:    "UNAUTHORIZED",
-					Message: "access to the requested resource is not authorized",
-				},
-			},
-		}
-	}
-	var details []DockerUnauthorizedErrorDetail
-	for _, action := range authScope.Actions {
-		details = append(details, DockerUnauthorizedErrorDetail{
-			Type:   authScope.Type,
-			Name:   authScope.Name,
-			Action: action,
-		})
-	}
-	return &DockerUnauthorized{
-		Errors: []DockerUnauthorizedError{
-			{
-				Code:    "UNAUTHORIZED",
-				Message: "access to the requested resource is not authorized",
-				Details: details,
-			},
-		},
-	}
-}
-
 //processRequest do auth and token verify for request
-func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWriter) bool {
+// HTTP/1.1 401 Unauthorized
+// Content-Type: application/json; charset=utf-8
+// Docker-Distribution-Api-Version: registry/2.0
+// Www-Authenticate: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:samalba/my-app:pull,push"
+// Date: Thu, 10 Sep 2015 19:32:31 GMT
+// Content-Length: 235
+// Strict-Transport-Security: max-age=31536000
+
+// {"errors":[{"code":"UNAUTHORIZED","message":"access to the requested resource is not authorized","detail":[{"Type":"repository","Name":"samalba/my-app","Action":"pull"},{"Type":"repository","Name":"samalba/my-app","Action":"push"}]}]}
+
+func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWriter) (bool, string) {
 	authScope := r.ParseRepoRequest(req)
 	authorizationInfo := req.Header.Get("Authorization")
 	isNotContainToken := false
 	if authorizationInfo == "" {
-		// HTTP/1.1 401 Unauthorized
-		// Content-Type: application/json; charset=utf-8
-		// Docker-Distribution-Api-Version: registry/2.0
-		// Www-Authenticate: Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:samalba/my-app:pull,push"
-		// Date: Thu, 10 Sep 2015 19:32:31 GMT
-		// Content-Length: 235
-		// Strict-Transport-Security: max-age=31536000
-
-		// {"errors":[{"code":"UNAUTHORIZED","message":"access to the requested resource is not authorized","detail":[{"Type":"repository","Name":"samalba/my-app","Action":"pull"},{"Type":"repository","Name":"samalba/my-app","Action":"push"}]}]}
 		isNotContainToken = true
 	}
 	authorizationInfos := strings.Split(authorizationInfo, " ")
@@ -231,85 +152,19 @@ func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWrite
 		w.Header().Add("Www-Authenticate", fmt.Sprintf("Bearer %s", realm))
 		w.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
 		w.WriteHeader(401)
-		result := NewDockerUnauthorized(authScope)
+		result := common.NewDockerUnauthorized(authScope)
 		// do not need process err here
 		data, _ := json.Marshal(result)
 		w.Write(data)
-		return false
+		return false, ""
 	}
-	return true
+	return true, authorizationInfos[1]
 }
 func (r *DockerAuthProxy) verifyToken(token string) bool {
 	return false
 }
 
-func (r *DockerAuthProxy) ParseRequest(req *http.Request) (*AuthRequest, error) {
-	ar := &AuthRequest{RemoteConnAddr: req.RemoteAddr, RemoteAddr: req.RemoteAddr}
-	if r.ProxyConfig.RealIPHeader != "" {
-		hv := req.Header.Get(r.ProxyConfig.RealIPHeader)
-		ips := strings.Split(hv, ",")
-		realIPPos := r.ProxyConfig.RealIPPos
-		if realIPPos < 0 {
-			realIPPos = len(ips) + realIPPos
-			if realIPPos < 0 {
-				realIPPos = 0
-			}
-		}
-		ar.RemoteAddr = strings.TrimSpace(ips[realIPPos])
-		log.Logger.Info("conn info", zap.String("RemoteAddr", ar.RemoteAddr),
-			zap.String("RealIPHeader", r.ProxyConfig.RealIPHeader),
-			zap.String("RealIPHeaderValue", hv))
-		if ar.RemoteAddr == "" {
-			return nil, fmt.Errorf("client address not provided")
-		}
-	}
-	ar.RemoteIP = parseRemoteAddr(ar.RemoteAddr)
-	if ar.RemoteIP == nil {
-		return nil, fmt.Errorf("unable to parse remote addr %s", ar.RemoteAddr)
-	}
-	user, password, haveBasicAuth := req.BasicAuth()
-	if haveBasicAuth {
-		ar.User = user
-		ar.Password = password
-	} else if req.Method == "POST" {
-		// username and password could be part of form data
-		username := req.FormValue("username")
-		password := req.FormValue("password")
-		if username != "" && password != "" {
-			ar.User = username
-			ar.Password = password
-		}
-	}
-	ar.Account = req.FormValue("account")
-	if ar.Account == "" {
-		ar.Account = ar.User
-	} else if haveBasicAuth && ar.Account != ar.User {
-		return nil, fmt.Errorf("user and account are not the same (%q vs %q)", ar.User, ar.Account)
-	}
-	ar.Service = req.FormValue("service")
-	if err := req.ParseForm(); err != nil {
-		return nil, fmt.Errorf("invalid form value")
-	}
-	//https://docs.docker.com/registry/spec/auth/token/
-	// https://github.com/docker/distribution/blob/1b9ab303a477ded9bdd3fc97e9119fa8f9e58fca/docs/spec/auth/scope.md#resource-scope-grammar
-	if req.FormValue("scope") != "" {
-		for _, scopeValue := range req.Form["scope"] {
-			for _, scopeStr := range strings.Split(scopeValue, " ") {
-
-				scope, err := r.ParseScope(scopeStr)
-				if err != nil {
-					log.Logger.Error("parse scope error", zap.Error(err))
-					return nil, fmt.Errorf("invalid scope: %q", scopeStr)
-				}
-				sort.Strings(scope.Actions)
-				ar.Scopes = append(ar.Scopes, *scope)
-			}
-		}
-	}
-	return ar, nil
-}
-
-func (r *DockerAuthProxy) ParseRepoRequest(req *http.Request) *AuthScope {
+func (r *DockerAuthProxy) ParseRepoRequest(req *http.Request) *common.AuthScope {
 	var resourceType = ""
 	var class = ""
 	var repoName = ""
@@ -317,7 +172,7 @@ func (r *DockerAuthProxy) ParseRepoRequest(req *http.Request) *AuthScope {
 	if strings.HasPrefix(req.URL.Path, "/v2/_catalog") {
 		resourceType = "registry"
 		actions = append(actions, "*")
-		return &AuthScope{
+		return &common.AuthScope{
 			Type:    resourceType,
 			Actions: actions,
 		}
@@ -334,7 +189,7 @@ func (r *DockerAuthProxy) ParseRepoRequest(req *http.Request) *AuthScope {
 		actions = append(actions, "pull")
 	}
 	class = "image"
-	return &AuthScope{
+	return &common.AuthScope{
 		Type:    resourceType,
 		Class:   class,
 		Name:    repoName,
@@ -360,48 +215,4 @@ func parseRepo(requestPath string) string {
 	}
 
 	return ""
-}
-
-func (t *DockerAuthProxy) ParseScope(scopeStr string) (*AuthScope, error) {
-	parts := strings.Split(scopeStr, ":")
-	var scope AuthScope
-
-	scopeType, scopeClass, err := parseScope(parts[0])
-	if err != nil {
-		return nil, err
-	}
-	switch len(parts) {
-	case 3:
-		scope = AuthScope{
-			Type:    scopeType,
-			Class:   scopeClass,
-			Name:    parts[1],
-			Actions: strings.Split(parts[2], ","),
-		}
-	case 4:
-		scope = AuthScope{
-			Type:    scopeType,
-			Class:   scopeClass,
-			Name:    parts[1] + ":" + parts[2],
-			Actions: strings.Split(parts[3], ","),
-		}
-	default:
-		return nil, fmt.Errorf("invalid scope: %q", scopeStr)
-	}
-	return &scope, nil
-}
-
-func parseScope(scope string) (string, string, error) {
-	parts := scopeRegex.FindStringSubmatch(scope)
-	if parts == nil {
-		return "", "", fmt.Errorf("malformed scope request")
-	}
-	switch len(parts) {
-	case 3:
-		return parts[1], "", nil
-	case 4:
-		return parts[1], parts[3], nil
-	default:
-		return "", "", fmt.Errorf("malformed scope request")
-	}
 }

@@ -17,14 +17,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type AuthType string
-
-var (
-	AuthTypeJWT   AuthType = "jwt"
-	AuthTypeOAuth AuthType = "oauth"
-	AuthTypeNone  AuthType = "none"
-)
-
 // https://github.com/cesanta/docker_auth.git
 var (
 	urlRegex    = regexp.MustCompile(`/v2/[A-Za-z0-9|\-|_|/|\.]+/blobs/`)
@@ -37,14 +29,11 @@ type DockerAuthProxy struct {
 	ForwardedProto      string
 	ProxyLocationPrefix string
 	proxy               *httputil.ReverseProxy
-	AuthType            AuthType
 	ProxyAuthUserName   string
 	ProxyAuthPassword   string
 	WebAuthURL          string
-	WebAuthType         string
-
-	CurrentHost string
-	UserAuth    userauth.Auth
+	CurrentHost         string
+	UserAuth            userauth.Auth
 }
 
 func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
@@ -68,6 +57,7 @@ func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
 		}
 		req.URL.Scheme = dockerUrl.Scheme
 		req.URL.Host = dockerUrl.Host
+		//TODO add auth token for current request
 		//req.URL.Path = req.URL.Path
 		log.Logger.Debug("------------------------------------------------------")
 		log.Logger.Debug("RequestPath", zap.String("RequestPath", req.URL.Path))

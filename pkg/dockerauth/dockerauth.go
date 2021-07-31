@@ -20,6 +20,14 @@ var (
 	hostPortRegex = regexp.MustCompile(`\[?(.+?)\]?:\d+$`)
 )
 
+type AuthType string
+
+var (
+	AuthTypeJWT   AuthType = "jwt"
+	AuthTypeOAuth AuthType = "oauth"
+	AuthTypeNone  AuthType = "none"
+)
+
 type DockerAuth struct {
 	ProxyConfig ProxyConfig
 }

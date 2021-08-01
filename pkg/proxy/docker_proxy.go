@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/distribution/registry/auth/token"
+	"github.com/docker/libtrust"
 	"github.com/shijunLee/docker-proxy-auth/pkg/common"
 	"github.com/shijunLee/docker-proxy-auth/pkg/log"
-	"github.com/shijunLee/docker-proxy-auth/pkg/userauth"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +33,16 @@ type DockerAuthProxy struct {
 	ProxyAuthUserName   string
 	ProxyAuthPassword   string
 	CurrentHost         string
-	UserAuth            userauth.Auth
+	JWT                 JWTConfig
+}
+
+type JWTConfig struct {
+	Issuer         string
+	CertKeyPath    string
+	PrivateKeyPath string
+	Expiration     int
+	publicKey      libtrust.PublicKey
+	privateKey     libtrust.PrivateKey
 }
 
 func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
@@ -83,7 +93,7 @@ func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
 func (p *DockerAuthProxy) DoProxy(w http.ResponseWriter, r *http.Request) {
 	requestPath := r.URL.Path
 	if strings.HasPrefix(requestPath, "/v2") {
-		if ok, token := p.processRequest(r, w); ok && p.verifyToken(token) {
+		if p.processRequest(r, w) {
 			p.proxy.ServeHTTP(w, r)
 		}
 	}
@@ -120,7 +130,7 @@ func (p *DockerAuthProxy) ProxyHttps() bool {
 
 // {"errors":[{"code":"UNAUTHORIZED","message":"access to the requested resource is not authorized","detail":[{"Type":"repository","Name":"samalba/my-app","Action":"pull"},{"Type":"repository","Name":"samalba/my-app","Action":"push"}]}]}
 
-func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWriter) (bool, string) {
+func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWriter) bool {
 	authScope := r.ParseRepoRequest(req)
 	authorizationInfo := req.Header.Get("Authorization")
 	isNotContainToken := false
@@ -131,7 +141,7 @@ func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWrite
 	if len(authorizationInfos) != 2 || authorizationInfos[0] != "Bearer" {
 		isNotContainToken = true
 	}
-	if !r.verifyToken(authorizationInfos[1]) {
+	if !r.verifyToken(authorizationInfos[1], authScope) {
 		isNotContainToken = true
 	}
 	if isNotContainToken {
@@ -145,11 +155,26 @@ func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWrite
 		// do not need process err here
 		data, _ := json.Marshal(result)
 		w.Write(data)
-		return false, ""
+		return false
 	}
-	return true, authorizationInfos[1]
+	return true
 }
-func (r *DockerAuthProxy) verifyToken(token string) bool {
+func (r *DockerAuthProxy) verifyToken(tokenString string, authScope *common.AuthScope) bool {
+	j := r.JWT
+	tokenArray := strings.Split(tokenString, token.TokenSeparator)
+	if len(tokenArray) != 2 {
+		return false
+	}
+	header := tokenArray[0]
+	headerValue, err := common.JoseBase64UrlDecode(header)
+	if err != nil {
+		return false
+	}
+	tokenHeader := &token.Header{}
+	err = json.Unmarshal(headerValue, tokenHeader)
+	if err != nil {
+		return false
+	}
 	return false
 }
 

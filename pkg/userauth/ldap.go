@@ -1,6 +1,7 @@
 package userauth
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 
@@ -13,6 +14,12 @@ type LDAPServerConfig struct {
 	BaseDN             string
 	//TODO use go template for this
 	Filter string
+}
+
+// AuthUser ldap auth with username password
+func (l *LDAPServerConfig) AuthUser(ctx context.Context, username, password string) bool {
+	err := l.ActionLdapLogin(username, password)
+	return err == nil
 }
 
 func (l *LDAPServerConfig) ActionLdapLogin(username, password string) error {

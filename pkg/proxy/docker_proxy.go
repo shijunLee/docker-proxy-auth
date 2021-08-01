@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -10,6 +11,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/docker/distribution/registry/auth/token"
+	"github.com/shijunLee/docker-proxy-auth/pkg/utils"
 
 	"github.com/docker/libtrust"
 	"github.com/shijunLee/docker-proxy-auth/pkg/common"
@@ -31,8 +35,11 @@ type DockerAuthProxy struct {
 	proxy               *httputil.ReverseProxy
 	ProxyAuthUserName   string
 	ProxyAuthPassword   string
+	ProxyDockerService  string
 	CurrentHost         string
 	JWT                 JWTConfig
+	authRealmAddress    string
+	authRealmType       string
 }
 
 type JWTConfig struct {
@@ -129,8 +136,8 @@ func (p *DockerAuthProxy) ProxyHttps() bool {
 
 // {"errors":[{"code":"UNAUTHORIZED","message":"access to the requested resource is not authorized","detail":[{"Type":"repository","Name":"samalba/my-app","Action":"pull"},{"Type":"repository","Name":"samalba/my-app","Action":"push"}]}]}
 
-func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWriter) bool {
-	authScope := r.ParseRepoRequest(req)
+func (p *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWriter) bool {
+	authScope := p.ParseRepoRequest(req)
 	authorizationInfo := req.Header.Get("Authorization")
 	isNotContainToken := false
 	if authorizationInfo == "" {
@@ -140,13 +147,13 @@ func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWrite
 	if len(authorizationInfos) != 2 || authorizationInfos[0] != "Bearer" {
 		isNotContainToken = true
 	}
-	if !r.verifyToken(authorizationInfos[1], authScope) {
+	if !p.verifyToken(authorizationInfos[1], authScope) {
 		isNotContainToken = true
 	}
 	if isNotContainToken {
 		w.Header().Add("Content-Type", "application/json; charset=utf-8")
 		w.Header().Add("Docker-Distribution-Api-Version", "registry/2.0")
-		realm := fmt.Sprintf(`realm="%s/dockerauth,service="registry.docker.io",scope="%s:%s:%s"`, r.CurrentHost, authScope.Type, authScope.Name, strings.Join(authScope.Actions, ","))
+		realm := fmt.Sprintf(`realm="%s/dockerauth,service="registry.docker.io",scope="%s:%s:%s"`, p.CurrentHost, authScope.Type, authScope.Name, strings.Join(authScope.Actions, ","))
 		w.Header().Add("Www-Authenticate", fmt.Sprintf("Bearer %s", realm))
 		w.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
 		w.WriteHeader(401)
@@ -158,41 +165,84 @@ func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWrite
 	}
 	return true
 }
-func (r *DockerAuthProxy) verifyToken(tokenString string, authScope *common.AuthScope) bool {
-	// j := r.JWT
-	// tokenArray := strings.Split(tokenString, token.TokenSeparator)
-	// if len(tokenArray) != 3 {
-	// 	return false
-	// }
-	// headerBase64 := tokenArray[0]
-	// headerData, err := common.JoseBase64UrlDecode(headerBase64)
-	// if err != nil {
-	// 	return false
-	// }
 
-	// tokenHeader := &token.Header{}
-	// err = json.Unmarshal(headerData, tokenHeader)
-	// if err != nil {
-	// 	return false
-	// }
-	// claimsJSONString := tokenArray[1]
-	// claimsJSONData, err := common.JoseBase64UrlDecode(claimsJSONString)
-	// if err != nil {
-	// 	return false
-	// }
-	// claims := &token.ClaimSet{}
-	// err = json.Unmarshal(claimsJSONData, claims)
-	// if err != nil {
-	// 	return false
-	// }
-	// //payload := fmt.Sprintf("%s%s%s", tokenArray[0], token.TokenSeparator, tokenArray[1])
-	// //sig, sigAlg2, err := j.privateKey.Sign(strings.NewReader(payload), 0)
-	// j.publicKey.Verify(nil, tokenHeader.SigningAlg, []byte(tokenArray[2]))
-
-	return false
+func (p *DockerAuthProxy) verifyToken(tokenString string, authScope *common.AuthScope) bool {
+	tokenInfo, err := token.NewToken(tokenString)
+	if err != nil {
+		return false
+	}
+	var verifyOptions = token.VerifyOptions{
+		TrustedIssuers: []string{p.JWT.Issuer},
+		TrustedKeys: map[string]libtrust.PublicKey{
+			p.JWT.publicKey.KeyID(): p.JWT.publicKey,
+		},
+	}
+	if p.ProxyDockerService != "" {
+		verifyOptions.AcceptedAudiences = []string{p.ProxyDockerService}
+	}
+	err = tokenInfo.Verify(verifyOptions)
+	if err != nil {
+		return false
+	}
+	for _, access := range tokenInfo.Claims.Access {
+		if access != nil && access.Name == authScope.Name && authScope.Type == access.Type {
+			for _, authSopeAction := range authScope.Actions {
+				isContain := false
+				for _, accessAction := range access.Actions {
+					if accessAction == authSopeAction {
+						isContain = true
+					}
+				}
+				if !isContain {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
-func (r *DockerAuthProxy) ParseRepoRequest(req *http.Request) *common.AuthScope {
+func (p *DockerAuthProxy) authProxy() {
+
+}
+
+func (p *DockerAuthProxy) getProxyAuthRealm() {
+	httpUtil := &utils.HttpUtil{}
+	catalogRequestURL := fmt.Sprintf("%s/v2/_catalog", p.ProxyAddress)
+	catalogRequest, err := http.NewRequest("GET", catalogRequestURL, nil)
+	if err != nil {
+		panic(err)
+	}
+	res, err := httpUtil.Do(catalogRequest)
+	if err != nil {
+		panic(err)
+	}
+	if res.StatusCode == 200 {
+		p.authRealmType = "None"
+	}
+	if res.StatusCode == 401 {
+		wwwAuthenticate := res.Header.Get("Www-Authenticate")
+		if wwwAuthenticate == "" {
+			panic(errors.New("the registry not support"))
+		}
+		wwwAuthenticateArray := strings.Split(wwwAuthenticate, " ")
+		if len(wwwAuthenticateArray) != 2 {
+			panic(errors.New("the registry not support"))
+		}
+		p.authRealmType = wwwAuthenticateArray[0]
+		if p.authRealmType != "Basic" {
+			authInfos := strings.Split(wwwAuthenticateArray[1], ",")
+			for _, item := range authInfos {
+				if strings.HasPrefix(item, "realm=") {
+					p.authRealmAddress = strings.Trim(strings.TrimPrefix(item, "realm="), "\"")
+					return
+				}
+			}
+		}
+	}
+}
+
+func (p *DockerAuthProxy) ParseRepoRequest(req *http.Request) *common.AuthScope {
 	var resourceType = ""
 	var class = ""
 	var repoName = ""

@@ -1,0 +1,5 @@
+{"level":"info","ts":"2021-08-02 01:07:00","caller":"log/log.go:44","msg":"Initialize logger successful."}
+{"level":"info","ts":"2021-08-02 01:08:16","caller":"log/log.go:44","msg":"Initialize logger successful."}
+{"level":"info","ts":"2021-08-02 01:09:29","caller":"log/log.go:44","msg":"Initialize logger successful."}
+{"level":"info","ts":"2021-08-02 01:09:43","caller":"log/log.go:44","msg":"Initialize logger successful."}
+{"level":"info","ts":"2021-08-02 01:10:49","caller":"log/log.go:44","msg":"Initialize logger successful."}

@@ -12,11 +12,13 @@ type DockerProxyAuthConfig struct {
 
 // JWTConfig the docker auth server jwt config
 type JWTConfig struct {
-	ExpirationTime int    `json:"expirationTime"`
-	JWTKey         string `json:"jwtKey"`
-	PrivateKeyPath string `json:"privateKeyPath"`
-	PublicKeyPath  string `json:"publicKeyPath"`
-	Algorithm      string `json:"algorithm"`
+	ExpirationTime  int    `json:"expirationTime"`
+	JWTKey          string `json:"jwtKey"`
+	PrivateKeyPath  string `json:"privateKeyPath"`
+	PublicKeyPath   string `json:"publicKeyPath"`
+	CertificatePath string `json:"certificatePath"`
+	Algorithm       string `json:"algorithm"`
+	Issuer          string `json:"issuer"`
 }
 
 //DockerAuthConfig docker auth server config
@@ -42,7 +44,8 @@ type UserAuthConfig struct {
 	Endpoint           string           `json:"endpoint"`
 	InsecureSkipVerify bool             `json:"insecureSkipVerify"`
 	PrivateKeyPath     string           `json:"privateKeyPath"`
-	PublicKeyPath      string           `json:"publicKeyPath"`
+	RootCAPath         string           `json:"rootCAPath"`
+	CertificatePath    string           `json:"certificatePath"`
 	LDAP               *LDAPConfig      `json:"ldap"`
 	WebHook            *WebHookConfig   `json:"webhook"`
 	OAuth2             *OAuth2Config    `json:"oauth2"`
@@ -64,16 +67,17 @@ type LDAPConfig struct {
 
 //OAuth2Config oauth2 config
 type OAuth2Config struct {
-	ClientID string `json:"clientID"`
-	Secret   string `json:"secret"`
-
+	ClientID     string `json:"clientID"`
+	ClientSecret string `json:"clientSecret"`
+	Scope        string `json:"scope"`
 	// default use post
 	RequestMethod string `json:"requestMethod"`
 }
 
 //BasicAuthConfig base auth config
 type BasicAuthConfig struct {
-	RequestMethod string `json:"requestMethod"`
+	RequestMethod string            `json:"requestMethod"`
+	CustomHeader  map[string]string `json:"customHeader"`
 }
 
 //PolicyConfig policy config

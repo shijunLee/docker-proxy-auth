@@ -1,5 +1,7 @@
 package userauth
 
+import "context"
+
 type Auth interface {
-	AuthUser(username, password string) bool
+	AuthUser(context context.Context, username, password string) bool
 }

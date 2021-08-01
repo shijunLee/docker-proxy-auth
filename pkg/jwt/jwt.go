@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/go-oauth2/oauth2/v4"
 	"github.com/google/uuid"
+	"github.com/shijunLee/docker-proxy-auth/pkg/config"
 )
 
 type Algorithm string
@@ -49,80 +49,57 @@ type JWTConfig struct {
 	AlgorithmMethod Algorithm
 	AuthDomain      string
 	algorithm       jwt.SigningMethod
+	Issuer          string
 }
 
-func NewJWTConfig(expirationTime int) *JWTConfig {
+func NewJWTConfig(jwtConfig *config.JWTConfig, currentDomain string) *JWTConfig {
 
 	// jwtAuthConfig := config.GlobalConfig.AuthConfig.JWTConfig
 	// var jwtTime = jwtAuthConfig.ExpirationHour
 	// if expirationTime != 0 {
 	// 	jwtTime = expirationTime
 	// }
-	jwtConfig := &JWTConfig{
-		// Logger:          logger,
-		// Key:             jwtAuthConfig.Hs256Key,
-		// ExpirationTime:  jwtTime,
-		// AlgorithmMethod: Algorithm(jwtAuthConfig.AlgorithmMethod),
-		// AuthDomain:      jwtAuthConfig.AuthDomain,
+	r := &JWTConfig{
+		Key:             jwtConfig.JWTKey,
+		ExpirationTime:  jwtConfig.ExpirationTime,
+		AlgorithmMethod: Algorithm(jwtConfig.Algorithm),
+		AuthDomain:      currentDomain,
+		Issuer:          jwtConfig.Issuer,
 	}
-	if jwtConfig.AlgorithmMethod == RS256 {
+	if r.AlgorithmMethod == RS256 {
 		var publicKey *rsa.PublicKey
 		var privateKey *rsa.PrivateKey
-		//var err error
-		// if jwtAuthConfig.PrivateKeyPath != "" && (jwtAuthConfig.CertificatePath != "" || jwtAuthConfig.PublicKeyPath != "") {
+		if jwtConfig.PrivateKeyPath != "" && (jwtConfig.CertificatePath != "" || jwtConfig.PublicKeyPath != "") {
+			if jwtConfig.CertificatePath != "" {
+				keyPair, err := tls.LoadX509KeyPair(jwtConfig.CertificatePath, jwtConfig.PrivateKeyPath)
+				if err != nil {
+					panic(err)
+				}
+				if keyPair.Leaf == nil {
+					panic(errors.New("get cert key error"))
+				}
+				publicKey = keyPair.Leaf.PublicKey.(*rsa.PublicKey)
+				privateKey = keyPair.PrivateKey.(*rsa.PrivateKey)
+			} else {
+				publicKey = loadRSAPublicKeyFromDisk(jwtConfig.PublicKeyPath)
+				privateKey = loadRSAPrivateKeyFromDisk(jwtConfig.PrivateKeyPath)
+			}
 
-		// 	if jwtAuthConfig.CertificatePath != "" {
-		// 		keyPair, err := tls.LoadX509KeyPair(jwtAuthConfig.CertificatePath, jwtAuthConfig.PrivateKeyPath)
-		// 		if err != nil {
-		// 			panic(err)
-		// 		}
-		// 		if keyPair.Leaf == nil {
-		// 			panic(errors.New("get cert key error"))
-		// 		}
-		// 		publicKey = keyPair.Leaf.PublicKey.(*rsa.PublicKey)
-		// 		privateKey = keyPair.PrivateKey.(*rsa.PrivateKey)
-		// 	} else {
-		// 		publicKey = loadRSAPublicKeyFromDisk(jwtAuthConfig.PublicKeyPath)
-		// 		privateKey = loadRSAPrivateKeyFromDisk(jwtAuthConfig.PrivateKeyPath)
-		// 	}
-
-		// } else {
-		// 	privateKey, err = parsePEMEncodedPrivateKey([]byte(jwtAuthConfig.PrivateKey))
-		// 	if err != nil {
-		// 		panic(err)
-		// 	}
-		// 	if jwtAuthConfig.Certificate != "" {
-		// 		certKey, err := parsePEMEncodedCert([]byte(jwtAuthConfig.Certificate))
-		// 		if err != nil {
-		// 			panic(err)
-		// 		}
-		// 		publicKey = certKey.PublicKey.(*rsa.PublicKey)
-
-		// 	} else if jwtAuthConfig.PublicKey != "" {
-		// 		var err error
-		// 		publicKey, err = parsePEMEncodedPublicKey([]byte(jwtAuthConfig.PublicKey))
-		// 		if err != nil {
-		// 			panic(err)
-		// 		}
-		// 	} else {
-		// 		panic(errors.New("not config public key or cert"))
-		// 	}
-
-		// }
+		}
 		if privateKey == nil || publicKey == nil {
 			panic(errors.New("not config public key or cert"))
 		}
-		jwtConfig.PublicKey = publicKey
-		jwtConfig.PrivateKey = privateKey
+		r.PublicKey = publicKey
+		r.PrivateKey = privateKey
 	}
 	var hs jwt.SigningMethod
-	if jwtConfig.AlgorithmMethod == HS256 {
+	if r.AlgorithmMethod == HS256 {
 		hs = jwt.SigningMethodHS256
-	} else if jwtConfig.AlgorithmMethod == RS256 {
+	} else if r.AlgorithmMethod == RS256 {
 		hs = jwt.SigningMethodRS256
 	}
-	jwtConfig.algorithm = hs
-	return jwtConfig
+	r.algorithm = hs
+	return r
 }
 
 func loadRSAPublicKeyFromDisk(location string) *rsa.PublicKey {
@@ -147,33 +124,6 @@ func loadRSAPrivateKeyFromDisk(location string) *rsa.PrivateKey {
 		panic(e)
 	}
 	return key
-}
-
-func parsePEMEncodedCert(pemdata []byte) (*x509.Certificate, error) {
-	var cert tls.Certificate
-	var skippedBlockTypes []string
-	for {
-		var certDERBlock *pem.Block
-		certDERBlock, pemdata = pem.Decode(pemdata)
-		if certDERBlock == nil {
-			break
-		}
-		if certDERBlock.Type == "CERTIFICATE" {
-			cert.Certificate = append(cert.Certificate, certDERBlock.Bytes)
-		} else {
-			skippedBlockTypes = append(skippedBlockTypes, certDERBlock.Type)
-		}
-	}
-	if len(cert.Certificate) == 0 {
-		if len(skippedBlockTypes) == 0 {
-			return nil, errors.New("tls: failed to find any PEM data in certificate input")
-		}
-		if len(skippedBlockTypes) == 1 && strings.HasSuffix(skippedBlockTypes[0], "PRIVATE KEY") {
-			return nil, errors.New("tls: failed to find certificate PEM data in certificate input, but did find a private key; PEM inputs may have been switched")
-		}
-		return nil, fmt.Errorf("tls: failed to find \"CERTIFICATE\" PEM block in certificate input after skipping PEM blocks of the following types: %v", skippedBlockTypes)
-	}
-	return x509.ParseCertificate(cert.Certificate[0])
 }
 
 func parsePEMEncodedPublicKey(pemdata []byte) (*rsa.PublicKey, error) {
@@ -249,7 +199,7 @@ func (j *JWTConfig) GetJWTToken(tokenInfo *JWTTokenInfo) (string, error) {
 			Audience:  j.AuthDomain,
 			Subject:   tokenInfo.UserName,
 			ExpiresAt: expirationTime.Unix(),
-			Issuer:    "tpaas",
+			Issuer:    j.Issuer,
 			IssuedAt:  timeNow,
 			NotBefore: timeNow,
 			Id:        tokenInfo.State,
@@ -284,7 +234,7 @@ func (j *JWTConfig) JWTVerify(tokenString string) (*JWTTokenInfo, error) {
 		return nil, err
 	}
 
-	if pl.Issuer != "tpaas" {
+	if pl.Issuer != j.Issuer {
 		return nil, errors.New("the token not issuer by tpaas")
 	}
 

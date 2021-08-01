@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/distribution/registry/auth/token"
 	"github.com/docker/libtrust"
 	"github.com/shijunLee/docker-proxy-auth/pkg/common"
 	"github.com/shijunLee/docker-proxy-auth/pkg/log"
@@ -160,21 +159,36 @@ func (r *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWrite
 	return true
 }
 func (r *DockerAuthProxy) verifyToken(tokenString string, authScope *common.AuthScope) bool {
-	j := r.JWT
-	tokenArray := strings.Split(tokenString, token.TokenSeparator)
-	if len(tokenArray) != 2 {
-		return false
-	}
-	header := tokenArray[0]
-	headerValue, err := common.JoseBase64UrlDecode(header)
-	if err != nil {
-		return false
-	}
-	tokenHeader := &token.Header{}
-	err = json.Unmarshal(headerValue, tokenHeader)
-	if err != nil {
-		return false
-	}
+	// j := r.JWT
+	// tokenArray := strings.Split(tokenString, token.TokenSeparator)
+	// if len(tokenArray) != 3 {
+	// 	return false
+	// }
+	// headerBase64 := tokenArray[0]
+	// headerData, err := common.JoseBase64UrlDecode(headerBase64)
+	// if err != nil {
+	// 	return false
+	// }
+
+	// tokenHeader := &token.Header{}
+	// err = json.Unmarshal(headerData, tokenHeader)
+	// if err != nil {
+	// 	return false
+	// }
+	// claimsJSONString := tokenArray[1]
+	// claimsJSONData, err := common.JoseBase64UrlDecode(claimsJSONString)
+	// if err != nil {
+	// 	return false
+	// }
+	// claims := &token.ClaimSet{}
+	// err = json.Unmarshal(claimsJSONData, claims)
+	// if err != nil {
+	// 	return false
+	// }
+	// //payload := fmt.Sprintf("%s%s%s", tokenArray[0], token.TokenSeparator, tokenArray[1])
+	// //sig, sigAlg2, err := j.privateKey.Sign(strings.NewReader(payload), 0)
+	// j.publicKey.Verify(nil, tokenHeader.SigningAlg, []byte(tokenArray[2]))
+
 	return false
 }
 

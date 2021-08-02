@@ -228,11 +228,9 @@ func (p *DockerAuthProxy) verifyToken(tokenString string, authScope *common.Auth
 func (p *DockerAuthProxy) authProxy(authScope *common.AuthScope) (token.Token, error) {
 	//https://auth.docker.io/token?service=registry.docker.io&scope=repository:samalba/my-app:pull,push
 	authURL := fmt.Sprintf("%s?service=%s&scope=%s", p.authRealmAddress, p.authRealmService, authScope.String())
-	httputil := &utils.HttpUtil{
-		Username: p.ProxyAuthUserName,
-		Password: p.ProxyAuthPassword,
-	}
+	httputil := &utils.HttpUtil{}
 	authRequest, err := http.NewRequest("GET", authURL, nil)
+	authRequest.SetBasicAuth(p.ProxyAuthUserName, p.ProxyAuthPassword)
 	if err != nil {
 		return token.Token{}, err
 	}

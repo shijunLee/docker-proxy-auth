@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/docker/distribution/registry/auth/token"
+	"github.com/shijunLee/docker-proxy-auth/pkg/cache"
 	"github.com/shijunLee/docker-proxy-auth/pkg/utils"
 
 	"github.com/docker/libtrust"
@@ -40,6 +41,7 @@ type DockerAuthProxy struct {
 	JWT                 JWTConfig
 	authRealmAddress    string
 	authRealmType       string
+	tokenCache          *cache.AuthCache
 }
 
 type JWTConfig struct {
@@ -69,6 +71,11 @@ func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
 		if p.ProxyHttps() {
 			req.Header.Set("X-Forwarded-Host", req.Host)
 			req.Header.Set("X-Forwarded-Proto", "https")
+		}
+		if p.authRealmType == "Basic" {
+			req.SetBasicAuth(p.ProxyAuthUserName, p.ProxyAuthPassword)
+		} else if p.authRealmType != "None" {
+
 		}
 		req.URL.Scheme = dockerUrl.Scheme
 		req.URL.Host = dockerUrl.Host

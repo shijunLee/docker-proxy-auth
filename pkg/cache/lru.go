@@ -51,7 +51,7 @@ func (c *AuthCache) cleanExpirationToken() {
 }
 
 //SetAuthToken add auth token to lru cache
-func (c *AuthCache) SetAuthToken(username, resourceType, name, string, action []string, token token.Token) {
+func (c *AuthCache) SetAuthToken(username, resourceType, name string, action []string, token token.Token) {
 	action = sort.StringSlice(action)
 	actionString := strings.Join(action, ",")
 	key := fmt.Sprintf("%s:%s:%s:%s", username, resourceType, name, actionString)
@@ -59,15 +59,15 @@ func (c *AuthCache) SetAuthToken(username, resourceType, name, string, action []
 }
 
 //GetAuthToken get Auth token from lru cache
-func (c *AuthCache) GetAuthToken(username, scope, repo, action []string) (string, bool) {
+func (c *AuthCache) GetAuthToken(username, resourceType, name string, action []string) (token.Token, bool) {
 	action = sort.StringSlice(action)
 	actionString := strings.Join(action, ",")
-	key := fmt.Sprintf("%s:%s:%s:%s", username, scope, repo, actionString)
+	key := fmt.Sprintf("%s:%s:%s:%s", username, resourceType, name, actionString)
 	value, ok := c.cache.Get(key)
 	if ok {
-		if valuestr, ok := value.(string); ok {
+		if valuestr, ok := value.(token.Token); ok {
 			return valuestr, true
 		}
 	}
-	return "", false
+	return token.Token{}, false
 }

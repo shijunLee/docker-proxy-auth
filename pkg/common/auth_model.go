@@ -3,6 +3,7 @@ package common
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 )
@@ -34,6 +35,12 @@ type AuthScope struct {
 	Class   string
 	Name    string
 	Actions []string
+}
+
+//String convert auth scope to `repository:samalba/my-app:pull,push` the docker auth scope
+func (s *AuthScope) String() string {
+	actionString := strings.Join(s.Actions, ",")
+	return fmt.Sprintf("%s:%s:%s", s.Type, s.Name, actionString)
 }
 
 type AuthResult struct {

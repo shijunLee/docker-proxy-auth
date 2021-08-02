@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -41,6 +42,7 @@ type DockerAuthProxy struct {
 	JWT                 JWTConfig
 	authRealmAddress    string
 	authRealmType       string
+	authRealmService    string
 	tokenCache          *cache.AuthCache
 }
 
@@ -50,7 +52,7 @@ type JWTConfig struct {
 	PrivateKeyPath string
 	Expiration     int
 	publicKey      libtrust.PublicKey
-	privateKey     libtrust.PrivateKey
+	//privateKey     libtrust.PrivateKey
 }
 
 func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
@@ -75,7 +77,21 @@ func (p *DockerAuthProxy) InitReverseProxy(targetUrl string) error {
 		if p.authRealmType == "Basic" {
 			req.SetBasicAuth(p.ProxyAuthUserName, p.ProxyAuthPassword)
 		} else if p.authRealmType != "None" {
-
+			actionScope := p.ParseRepoRequest(req)
+			if actionScope != nil {
+				tokenInfo, ok := p.tokenCache.GetAuthToken(p.ProxyAuthUserName, actionScope.Type, actionScope.Name, actionScope.Actions)
+				if !ok {
+					tokenInfo, err = p.authProxy(actionScope)
+					if err != nil {
+						log.Logger.Error("get token from server error", zap.Error(err))
+					} else {
+						p.tokenCache.SetAuthToken(p.ProxyAuthUserName, actionScope.Type, actionScope.Name, actionScope.Actions, tokenInfo)
+					}
+				}
+				if tokenInfo.Raw != "" {
+					req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", tokenInfo.Raw))
+				}
+			}
 		}
 		req.URL.Scheme = dockerUrl.Scheme
 		req.URL.Host = dockerUrl.Host
@@ -110,7 +126,6 @@ func (p *DockerAuthProxy) DoProxy(w http.ResponseWriter, r *http.Request) {
 			p.proxy.ServeHTTP(w, r)
 		}
 	}
-
 }
 
 func (p *DockerAuthProxy) ReplaceResponseLocation(location string, request *http.Request) string {
@@ -160,7 +175,8 @@ func (p *DockerAuthProxy) processRequest(req *http.Request, w http.ResponseWrite
 	if isNotContainToken {
 		w.Header().Add("Content-Type", "application/json; charset=utf-8")
 		w.Header().Add("Docker-Distribution-Api-Version", "registry/2.0")
-		realm := fmt.Sprintf(`realm="%s/dockerauth,service="registry.docker.io",scope="%s:%s:%s"`, p.CurrentHost, authScope.Type, authScope.Name, strings.Join(authScope.Actions, ","))
+		realm := fmt.Sprintf(`realm="%s/dockerauth,service="%s",scope="%s:%s:%s"`,
+			p.CurrentHost, p.authRealmService, authScope.Type, authScope.Name, strings.Join(authScope.Actions, ","))
 		w.Header().Add("Www-Authenticate", fmt.Sprintf("Bearer %s", realm))
 		w.Header().Set("Date", time.Now().UTC().Format(http.TimeFormat))
 		w.WriteHeader(401)
@@ -209,8 +225,48 @@ func (p *DockerAuthProxy) verifyToken(tokenString string, authScope *common.Auth
 	return true
 }
 
-func (p *DockerAuthProxy) authProxy() {
+func (p *DockerAuthProxy) authProxy(authScope *common.AuthScope) (token.Token, error) {
+	//https://auth.docker.io/token?service=registry.docker.io&scope=repository:samalba/my-app:pull,push
+	authURL := fmt.Sprintf("%s?service=%s&scope=%s", p.authRealmAddress, p.authRealmService, authScope.String())
+	httputil := &utils.HttpUtil{
+		Username: p.ProxyAuthUserName,
+		Password: p.ProxyAuthPassword,
+	}
+	authRequest, err := http.NewRequest("GET", authURL, nil)
+	if err != nil {
+		return token.Token{}, err
+	}
+	res, err := httputil.Do(authRequest)
+	if err != nil {
+		return token.Token{}, err
+	}
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return token.Token{}, err
+	}
+	if res.StatusCode != 200 {
+		return token.Token{}, errors.New(string(data))
+	}
+	// "access_token": token,
+	// "token":        token,
+	// "expires_in":   expiresIn,
+	// "issued_at":    time.Now(),
+	resultMap := map[string]interface{}{}
+	err = json.Unmarshal(data, &resultMap)
+	if err != nil {
+		return token.Token{}, err
+	}
+	tokenValue, ok := resultMap["token"]
+	if ok {
+		tokenString := tokenValue.(string)
+		tokenInfo, err := token.NewToken(tokenString)
+		if err != nil {
+			return token.Token{}, err
+		}
+		return *tokenInfo, nil
+	}
 
+	return token.Token{}, errors.New("not found token in realm auth request")
 }
 
 func (p *DockerAuthProxy) getProxyAuthRealm() {
@@ -242,7 +298,9 @@ func (p *DockerAuthProxy) getProxyAuthRealm() {
 			for _, item := range authInfos {
 				if strings.HasPrefix(item, "realm=") {
 					p.authRealmAddress = strings.Trim(strings.TrimPrefix(item, "realm="), "\"")
-					return
+				}
+				if strings.HasPrefix(item, "service=") {
+					p.authRealmService = strings.Trim(strings.TrimPrefix(item, "service="), "\"")
 				}
 			}
 		}

@@ -14,3 +14,6 @@
 # Dependency directories (remove the comment below to include it)
 vendor/
 .idea
+docker_proxy_tpaas_test.go
+launch.json
+docker-auth-proxy.log

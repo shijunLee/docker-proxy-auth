@@ -46,6 +46,7 @@ type UserAuthConfig struct {
 	PrivateKeyPath     string           `json:"privateKeyPath"`
 	RootCAPath         string           `json:"rootCAPath"`
 	CertificatePath    string           `json:"certificatePath"`
+	ContentType        string           `json:"contentType"`
 	LDAP               *LDAPConfig      `json:"ldap"`
 	WebHook            *WebHookConfig   `json:"webhook"`
 	OAuth2             *OAuth2Config    `json:"oauth2"`

@@ -1,4 +1,4 @@
-package dockerauth
+package policy
 
 import (
 	"context"
@@ -26,4 +26,11 @@ type PolicyInterface interface {
 	ListPolicyForUser(ctx context.Context, username string)
 	// use like
 	ListPolicyForRepo(ctx context.Context, repoName string)
+}
+
+type NoneOpPolicy struct {
+}
+
+func (p *NoneOpPolicy) AuthorizeUserResourceScope(authRequest *common.AuthRequestInfo) ([]string, error) {
+	return []string{"pull", "push", "*"}, nil
 }

@@ -2,9 +2,11 @@ package common
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 )
 
@@ -21,13 +23,44 @@ type AuthRequest struct {
 }
 
 type AuthRequestInfo struct {
-	Account string
-	Type    string
-	Name    string
-	Service string
-	IP      net.IP
-	Actions []string
-	Labels  map[string][]string
+	Account string              `json:"account"`
+	Type    string              `json:"type"`
+	Name    string              `json:"name"`
+	Service string              `json:"service"`
+	IP      net.IP              `json:"ip"`
+	Actions []string            `json:"actions"`
+	Labels  map[string][]string `json:"-"`
+}
+
+func (a *AuthRequestInfo) BuildJsonBody() string {
+	data, _ := json.Marshal(a)
+	return string(data)
+}
+
+func (a *AuthRequestInfo) BuildFormBody() string {
+	var values = &url.Values{}
+	values.Set("name", a.Name)
+	values.Set("type", a.Type)
+	values.Set("account", a.Account)
+	values.Set("ip", string(a.IP))
+	values.Set("service", a.Service)
+	for index, action := range a.Actions {
+		values.Set(fmt.Sprintf("actions[%d]", index), action)
+	}
+	return values.Encode()
+}
+
+func (a *AuthRequestInfo) BuildQuery() string {
+	var values = &url.Values{}
+	values.Set("name", a.Name)
+	values.Set("type", a.Type)
+	values.Set("ip", string(a.IP))
+	values.Set("service", a.Service)
+	values.Set("account", a.Account)
+	for _, action := range a.Actions {
+		values.Add("actions", action)
+	}
+	return values.Encode()
 }
 
 type AuthScope struct {

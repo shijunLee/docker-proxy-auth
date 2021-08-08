@@ -6,18 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"time"
-
 	"net"
-	"regexp"
-
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/docker/distribution/registry/auth/token"
 	"github.com/docker/libtrust"
 	"github.com/shijunLee/docker-proxy-auth/pkg/common"
+	"github.com/shijunLee/docker-proxy-auth/pkg/dockerauth/policy"
 	"github.com/shijunLee/docker-proxy-auth/pkg/log"
 	"github.com/shijunLee/docker-proxy-auth/pkg/userauth"
 	"go.uber.org/zap"
@@ -39,7 +38,7 @@ var (
 type DockerAuth struct {
 	ProxyConfig          *ProxyConfig
 	Auth                 userauth.Auth
-	DockerPolicyAuth     DockerPolicyAuth
+	DockerPolicyAuth     policy.DockerPolicyAuth
 	JWT                  *JWTConfig
 	CurrentServiceDomain string
 	AuthPath             string

@@ -12,6 +12,7 @@ type PolicyInfo struct {
 	RepoName  string   `json:"repoName,omitempty"`
 	Operation string   `json:"operation,omitempty"`
 	Actions   []string `json:"actions,omitempty"`
+	Type      string   `json:"type,omitempty"`
 }
 
 type UserPolicyStatus struct {

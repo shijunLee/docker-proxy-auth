@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/shijunLee/docker-proxy-auth/pkg/common"
+	policycommon "github.com/shijunLee/docker-proxy-auth/pkg/dockerauth/policy/common"
 	dockerauthclient "github.com/shijunLee/docker-proxy-auth/pkg/dockerauth/policy/kubernetes/client"
 	dockerauthv1alpha1 "github.com/shijunLee/docker-proxy-auth/pkg/dockerauth/policy/kubernetes/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,6 +71,28 @@ func (k *KubernetesPolicy) Init(ctx context.Context) {
 	k.store = store
 	go controller.Run(ctx.Done())
 	<-ctx.Done()
+}
+
+func (k *KubernetesPolicy) AddPolicy(ctx context.Context, p policycommon.Policy) (policycommon.Policy, error) {
+	return nil, nil
+}
+func (k *KubernetesPolicy) UpdatePolicy(ctx context.Context, p policycommon.Policy) (policycommon.Policy, error) {
+	return nil, nil
+}
+func (k *KubernetesPolicy) DeletePolicy(ctx context.Context, p policycommon.Policy) error {
+	return nil
+}
+func (k *KubernetesPolicy) ListPolicyForUser(ctx context.Context, username string) ([]policycommon.Policy, error) {
+	return nil, nil
+}
+
+// use like
+func (k *KubernetesPolicy) ListPolicyForRepo(ctx context.Context, repoName string) ([]policycommon.Policy, error) {
+	return nil, nil
+}
+
+func (k *KubernetesPolicy) AuthorizeUserResourceScope(authRequest *common.AuthRequestInfo) ([]string, error) {
+	return nil, nil
 }
 
 func getCurrentNameSpace() string {

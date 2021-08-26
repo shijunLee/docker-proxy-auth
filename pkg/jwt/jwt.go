@@ -7,12 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"strings"
 	"time"
 
-	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/go-oauth2/oauth2/v4"
+	jwt "github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"github.com/shijunLee/docker-proxy-auth/pkg/config"
 )
@@ -156,7 +157,7 @@ func (j *JWTConfig) Token(data *oauth2.GenerateBasic, isGenRefresh bool) (access
 			Audience:  data.Client.GetID(),
 			Subject:   data.UserID,
 			ExpiresAt: expiresTime.Unix(),
-			Issuer:    "tpaas",
+			Issuer:    j.Issuer,
 			IssuedAt:  timeNow,
 			NotBefore: timeNow,
 			Id:        data.TokenInfo.GetScope(),
@@ -235,7 +236,7 @@ func (j *JWTConfig) JWTVerify(tokenString string) (*JWTTokenInfo, error) {
 	}
 
 	if pl.Issuer != j.Issuer {
-		return nil, errors.New("the token not issuer by tpaas")
+		return nil, fmt.Errorf("the token issuer is not eq %s", j.Issuer)
 	}
 
 	result := &JWTTokenInfo{

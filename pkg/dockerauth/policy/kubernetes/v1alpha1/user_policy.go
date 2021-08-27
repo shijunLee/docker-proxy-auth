@@ -13,6 +13,8 @@ type PolicyInfo struct {
 	Operation string   `json:"operation,omitempty"`
 	Actions   []string `json:"actions,omitempty"`
 	Type      string   `json:"type,omitempty"`
+	//+nullable
+	Username string `json:"username,omitempty"`
 }
 
 type UserPolicyStatus struct {
@@ -42,4 +44,23 @@ type UserPolicyList struct {
 
 func init() {
 	SchemeBuilder.Register(&UserPolicy{}, &UserPolicyList{})
+}
+
+func (c *PolicyInfo) GetPolicyRepo() string {
+	return c.RepoName
+}
+
+func (c *PolicyInfo) GetUsername() string {
+	return ""
+}
+
+func (c *PolicyInfo) GetOperation() string { // start with or eq
+	return c.Operation
+}
+
+func (c *PolicyInfo) GetAction() []string { // pull or push
+	return c.Actions
+}
+func (c *PolicyInfo) GetType() string { // registry(get catalog) or repository
+	return c.Type
 }

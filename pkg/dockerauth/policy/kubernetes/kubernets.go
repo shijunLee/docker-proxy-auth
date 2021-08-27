@@ -144,10 +144,9 @@ func (k *KubernetesPolicy) UpdatePolicy(ctx context.Context, p policycommon.Poli
 	var repoObjects []dockerauthv1alpha1.PolicyInfo
 	var policiesInfos = cacheObject.Spec.Policies
 	for _, item := range policiesInfos {
-		if item.RepoName == p.GetPolicyRepo() {
+		if item.RepoName == p.GetPolicyRepo() && item.Type == p.GetType() {
 			item.Actions = p.GetAction()
 			item.Operation = p.GetOperation()
-			item.Type = p.GetType()
 		}
 		repoObjects = append(repoObjects, item)
 	}
@@ -157,10 +156,69 @@ func (k *KubernetesPolicy) UpdatePolicy(ctx context.Context, p policycommon.Poli
 }
 
 func (k *KubernetesPolicy) DeletePolicy(ctx context.Context, p policycommon.Policy) error {
-	return nil
+	var cacheObject = &dockerauthv1alpha1.UserPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      p.GetUsername(),
+			Namespace: getCurrentNameSpace(),
+		},
+	}
+	var isExist = false
+	key, err := cache.MetaNamespaceKeyFunc(cacheObject)
+	if err == nil {
+		var cacheItem interface{}
+		cacheItem, isExist, err = k.store.GetByKey(key)
+		if err == nil && isExist {
+			cacheObject = cacheItem.(*dockerauthv1alpha1.UserPolicy)
+		} else {
+			return err
+		}
+	} else {
+		return err
+	}
+	if !isExist {
+		return nil
+	}
+	var repoObjects []dockerauthv1alpha1.PolicyInfo
+	var policiesInfos = cacheObject.Spec.Policies
+	for _, item := range policiesInfos {
+		if item.RepoName != p.GetPolicyRepo() || item.Type != p.GetType() {
+			repoObjects = append(repoObjects, item)
+		}
+	}
+	cacheObject.Spec.Policies = repoObjects
+	_, err = k.userPolicyClient.Update(ctx, cacheObject, metav1.UpdateOptions{})
+	return err
 }
 func (k *KubernetesPolicy) ListPolicyForUser(ctx context.Context, username string) ([]policycommon.Policy, error) {
-	return nil, nil
+	var cacheObject = &dockerauthv1alpha1.UserPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      username,
+			Namespace: getCurrentNameSpace(),
+		},
+	}
+	var isExist = false
+	key, err := cache.MetaNamespaceKeyFunc(cacheObject)
+	if err == nil {
+		var cacheItem interface{}
+		cacheItem, isExist, err = k.store.GetByKey(key)
+		if err == nil && isExist {
+			cacheObject = cacheItem.(*dockerauthv1alpha1.UserPolicy)
+		} else {
+			return nil, err
+		}
+	} else {
+		return nil, err
+	}
+	if !isExist {
+		return nil, nil
+	}
+	kubeDockerPolicyList := cacheObject.Spec.Policies
+	var result []policycommon.Policy
+	for _, item := range kubeDockerPolicyList {
+		item.Username = username
+		result = append(result, &item)
+	}
+	return result, nil
 }
 
 // use like
@@ -169,6 +227,35 @@ func (k *KubernetesPolicy) ListPolicyForRepo(ctx context.Context, repoName strin
 }
 
 func (k *KubernetesPolicy) AuthorizeUserResourceScope(authRequest *common.AuthRequestInfo) ([]string, error) {
+	var cacheObject = &dockerauthv1alpha1.UserPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      authRequest.Account,
+			Namespace: getCurrentNameSpace(),
+		},
+	}
+	var isExist = false
+	key, err := cache.MetaNamespaceKeyFunc(cacheObject)
+	if err == nil {
+		var cacheItem interface{}
+		cacheItem, isExist, err = k.store.GetByKey(key)
+		if err == nil && isExist {
+			cacheObject = cacheItem.(*dockerauthv1alpha1.UserPolicy)
+		} else {
+			return nil, err
+		}
+	} else {
+		return nil, err
+	}
+	if !isExist {
+		return nil, nil
+	}
+	var policies = cacheObject.Spec.Policies
+	for _, item := range policies {
+		//TODO add operation logic
+		if item.Type == authRequest.Type && item.RepoName == authRequest.Name {
+			return item.Actions, nil
+		}
+	}
 	return nil, nil
 }
 

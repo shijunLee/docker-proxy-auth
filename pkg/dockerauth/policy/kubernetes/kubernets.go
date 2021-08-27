@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"time"
@@ -74,11 +75,87 @@ func (k *KubernetesPolicy) Init(ctx context.Context) {
 }
 
 func (k *KubernetesPolicy) AddPolicy(ctx context.Context, p policycommon.Policy) (policycommon.Policy, error) {
-	return nil, nil
+	var cacheObject = &dockerauthv1alpha1.UserPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      p.GetUsername(),
+			Namespace: getCurrentNameSpace(),
+		},
+	}
+	var isExist = false
+	key, err := cache.MetaNamespaceKeyFunc(cacheObject)
+	if err == nil {
+		var cacheItem interface{}
+		cacheItem, isExist, err = k.store.GetByKey(key)
+		if err == nil && isExist {
+			cacheObject = cacheItem.(*dockerauthv1alpha1.UserPolicy)
+		}
+	}
+
+	//TODO add log for this
+
+	var policies []dockerauthv1alpha1.PolicyInfo
+	var policy = dockerauthv1alpha1.PolicyInfo{
+		RepoName:  p.GetPolicyRepo(),
+		Operation: p.GetOperation(),
+		Actions:   p.GetAction(),
+		Type:      p.GetType(),
+	}
+	policies = append(policies, policy)
+	if isExist {
+		cacheObject.Spec.Policies = append(cacheObject.Spec.Policies, policies...)
+		_, err := k.userPolicyClient.Update(ctx, cacheObject, metav1.UpdateOptions{})
+		return p, err
+	} else {
+		kUserPolicy := &dockerauthv1alpha1.UserPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: p.GetUsername(),
+			}, Spec: dockerauthv1alpha1.UserPolicySpec{
+				Policies: policies,
+			},
+		}
+		_, err = k.userPolicyClient.Create(ctx, kUserPolicy, metav1.CreateOptions{})
+		return p, err
+	}
+
 }
 func (k *KubernetesPolicy) UpdatePolicy(ctx context.Context, p policycommon.Policy) (policycommon.Policy, error) {
-	return nil, nil
+	var cacheObject = &dockerauthv1alpha1.UserPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      p.GetUsername(),
+			Namespace: getCurrentNameSpace(),
+		},
+	}
+	var isExist = false
+	key, err := cache.MetaNamespaceKeyFunc(cacheObject)
+	if err == nil {
+		var cacheItem interface{}
+		cacheItem, isExist, err = k.store.GetByKey(key)
+		if err == nil && isExist {
+			cacheObject = cacheItem.(*dockerauthv1alpha1.UserPolicy)
+		} else {
+			return nil, err
+		}
+	} else {
+		return nil, err
+	}
+	if !isExist {
+		return nil, fmt.Errorf("policy for user %s repo %s not found", p.GetUsername(), p.GetPolicyRepo())
+	}
+	var repoObjects []dockerauthv1alpha1.PolicyInfo
+	var policiesInfos = cacheObject.Spec.Policies
+	for _, item := range policiesInfos {
+		if item.RepoName == p.GetPolicyRepo() {
+			item.Actions = p.GetAction()
+			item.Operation = p.GetOperation()
+			item.Type = p.GetType()
+		}
+		repoObjects = append(repoObjects, item)
+	}
+	cacheObject.Spec.Policies = repoObjects
+	_, err = k.userPolicyClient.Update(ctx, cacheObject, metav1.UpdateOptions{})
+	return p, err
 }
+
 func (k *KubernetesPolicy) DeletePolicy(ctx context.Context, p policycommon.Policy) error {
 	return nil
 }

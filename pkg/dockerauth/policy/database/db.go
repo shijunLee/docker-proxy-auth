@@ -3,14 +3,13 @@ package database
 import (
 	"strings"
 
-	"github.com/shijunLee/docker-proxy-auth/pkg/common"
 	"gorm.io/gorm"
 )
 
 //TODO use gorm support this for mysql sqlite pg etc.
 type Policy struct {
 	gorm.Model
-	Username  string `json:"string" gorm:"index"`
+	Username  string `json:"username" gorm:"index"`
 	RepoName  string `json:"repoName"`
 	Operation string `json:"operation"`
 	Actions   string `json:"actions"` //TODO,convert this to a array
@@ -31,7 +30,4 @@ func (p *Policy) GetAction() []string { // pull or push
 }
 func (p *Policy) GetType() string { // registry(get catalog) or repository
 	return p.Type
-}
-func (p *Policy) AuthorizeUserResourceScope(authRequest *common.AuthRequestInfo) ([]string, error) {
-	return nil, nil
 }

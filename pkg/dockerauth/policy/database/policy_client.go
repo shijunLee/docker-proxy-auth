@@ -6,11 +6,13 @@ import (
 	"strings"
 
 	dockerauthcommon "github.com/shijunLee/docker-proxy-auth/pkg/common"
-	"github.com/shijunLee/docker-proxy-auth/pkg/dockerauth/policy/common"
+	policycommon "github.com/shijunLee/docker-proxy-auth/pkg/dockerauth/policy/common"
 	"github.com/shijunLee/docker-proxy-auth/pkg/utils"
 )
 
 var globalUserPolicyClient *UserPolicyClient
+var _ policycommon.DockerPolicyAuth = &UserPolicyClient{}
+var _ policycommon.PolicyInterface = &UserPolicyClient{}
 
 type UserPolicyClient struct {
 	DBUsername string
@@ -41,7 +43,7 @@ func NewUserPolicyClient(dbType, host, username, password, dbName, otherDSN stri
 	return userPolicyClient
 }
 
-func (c *UserPolicyClient) GetPolicy(ctx context.Context, p common.Policy) (*Policy, error) {
+func (c *UserPolicyClient) GetPolicy(ctx context.Context, p policycommon.Policy) (*Policy, error) {
 	var policyList = []Policy{}
 	err := c.rdbClient.db.Model(&Policy{}).Where("username = ? AND repoName = ? AND type = ?", p.GetUsername(), p.GetPolicyRepo(), p.GetType()).Find(&policyList).Error
 	if err != nil {
@@ -56,7 +58,7 @@ func (c *UserPolicyClient) GetPolicy(ctx context.Context, p common.Policy) (*Pol
 	return &policyList[0], nil
 }
 
-func (c *UserPolicyClient) AddPolicy(ctx context.Context, p common.Policy) (common.Policy, error) {
+func (c *UserPolicyClient) AddPolicy(ctx context.Context, p policycommon.Policy) (policycommon.Policy, error) {
 	policyItems, err := c.GetPolicy(ctx, p)
 	if err != nil {
 		return nil, err
@@ -79,7 +81,7 @@ func (c *UserPolicyClient) AddPolicy(ctx context.Context, p common.Policy) (comm
 	}
 	return policy, nil
 }
-func (c *UserPolicyClient) UpdatePolicy(ctx context.Context, p common.Policy) (common.Policy, error) {
+func (c *UserPolicyClient) UpdatePolicy(ctx context.Context, p policycommon.Policy) (policycommon.Policy, error) {
 
 	policyItem, err := c.GetPolicy(ctx, p)
 	if err != nil {
@@ -96,7 +98,7 @@ func (c *UserPolicyClient) UpdatePolicy(ctx context.Context, p common.Policy) (c
 	}
 	return policyItem, nil
 }
-func (c *UserPolicyClient) DeletePolicy(ctx context.Context, p common.Policy) error {
+func (c *UserPolicyClient) DeletePolicy(ctx context.Context, p policycommon.Policy) error {
 	policyItem, err := c.GetPolicy(ctx, p)
 	if err != nil {
 		return err
@@ -106,13 +108,13 @@ func (c *UserPolicyClient) DeletePolicy(ctx context.Context, p common.Policy) er
 	}
 	return c.rdbClient.db.Model(&Policy{}).Delete(policyItem).Error
 }
-func (c *UserPolicyClient) ListPolicyForUser(ctx context.Context, username string) ([]common.Policy, error) {
+func (c *UserPolicyClient) ListPolicyForUser(ctx context.Context, username string) ([]policycommon.Policy, error) {
 	var policyList = []Policy{}
 	err := c.rdbClient.db.Model(&Policy{}).Where("username = ?", username).Find(&policyList).Error
 	if err != nil {
 		return nil, err
 	}
-	var result []common.Policy
+	var result []policycommon.Policy
 	for _, item := range policyList {
 		result = append(result, &item)
 	}
@@ -120,7 +122,7 @@ func (c *UserPolicyClient) ListPolicyForUser(ctx context.Context, username strin
 }
 
 // use like
-func (c *UserPolicyClient) ListPolicyForRepo(ctx context.Context, repoName string) ([]common.Policy, error) {
+func (c *UserPolicyClient) ListPolicyForRepo(ctx context.Context, repoName string) ([]policycommon.Policy, error) {
 	return nil, nil
 }
 

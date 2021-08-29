@@ -26,6 +26,9 @@ const (
 	currentNamespacePath string = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 )
 
+var _ policycommon.DockerPolicyAuth = &KubernetesPolicy{}
+var _ policycommon.PolicyInterface = &KubernetesPolicy{}
+
 // support kubernetes api
 
 type KubernetesPolicy struct {

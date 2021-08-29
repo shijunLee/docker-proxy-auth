@@ -17,10 +17,14 @@ require (
 	github.com/spf13/viper v1.8.1
 	go.uber.org/zap v1.18.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
+	gorm.io/driver/clickhouse v0.2.1
+	gorm.io/driver/mysql v1.1.2
+	gorm.io/driver/postgres v1.1.0
+	gorm.io/driver/sqlite v1.1.4
+	gorm.io/driver/sqlserver v1.0.8
 	gorm.io/gorm v1.21.14
 	k8s.io/apimachinery v0.22.1
 	k8s.io/client-go v0.22.1
-	k8s.io/kubectl v0.22.1
 	sigs.k8s.io/controller-runtime v0.9.6
 	sigs.k8s.io/yaml v1.2.0
 )

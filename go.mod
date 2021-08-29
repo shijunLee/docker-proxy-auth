@@ -19,7 +19,8 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gorm.io/gorm v1.21.14
 	k8s.io/apimachinery v0.22.1
-	k8s.io/client-go v0.21.3
+	k8s.io/client-go v0.22.1
+	k8s.io/kubectl v0.22.1
 	sigs.k8s.io/controller-runtime v0.9.6
 	sigs.k8s.io/yaml v1.2.0
 )

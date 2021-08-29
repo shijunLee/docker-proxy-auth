@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/shijunLee/docker-proxy-auth/pkg/common"
 	policycommon "github.com/shijunLee/docker-proxy-auth/pkg/dockerauth/policy/common"
 	dockerauthclient "github.com/shijunLee/docker-proxy-auth/pkg/dockerauth/policy/kubernetes/client"
 	dockerauthv1alpha1 "github.com/shijunLee/docker-proxy-auth/pkg/dockerauth/policy/kubernetes/v1alpha1"
+	"github.com/shijunLee/docker-proxy-auth/pkg/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -189,6 +191,7 @@ func (k *KubernetesPolicy) DeletePolicy(ctx context.Context, p policycommon.Poli
 	_, err = k.userPolicyClient.Update(ctx, cacheObject, metav1.UpdateOptions{})
 	return err
 }
+
 func (k *KubernetesPolicy) ListPolicyForUser(ctx context.Context, username string) ([]policycommon.Policy, error) {
 	var cacheObject = &dockerauthv1alpha1.UserPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -252,8 +255,22 @@ func (k *KubernetesPolicy) AuthorizeUserResourceScope(authRequest *common.AuthRe
 	var policies = cacheObject.Spec.Policies
 	for _, item := range policies {
 		//TODO add operation logic
-		if item.Type == authRequest.Type && item.RepoName == authRequest.Name {
+		if item.Type == authRequest.Type &&
+			item.RepoName == authRequest.Name &&
+			utils.IsStringSubSlice(item.Actions, authRequest.Actions) {
 			return item.Actions, nil
+		}
+
+		if strings.ToLower(item.Operation) == "like" ||
+			strings.HasSuffix(item.RepoName, "*") {
+			repoName := strings.TrimSuffix(item.RepoName, "*")
+			repoName = fmt.Sprintf("%s/", repoName)
+			if item.Type == authRequest.Type &&
+				strings.HasPrefix(authRequest.Name, repoName) &&
+				utils.IsStringSubSlice(item.Actions, authRequest.Actions) {
+
+				return item.Actions, nil
+			}
 		}
 	}
 	return nil, nil
